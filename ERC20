@@ -1,0 +1,104 @@
+pragma solidity ^0.4.16;//版本号
+ 
+//接口：tokenRecipient
+interface tokenRecipient {
+     function receiveApproval(address _from, uint256 _value, address _token, bytes         _extraData) public;
+ }
+ 
+contract TokenERC20 {
+    string public name;//币种的名字
+    string public symbol;//币种名的简称，比如：比特币就是BTC
+    // 位数18是建议的默认值。ether和wei的转换是10^18
+    //如果设置为0，那么就代币就不可分割。这样就相当于：比特币里面只可以一个币一个币来交易
+    uint8 public decimals = 18;
+    uint256 public totalSupply;//设置的总发币量
+ 
+    //你本人给别人转币：每一个地址对应一个余额
+    mapping (address => uint256) public balanceOf;
+    //发你授权给A，A就有权利把你的钱转给其他人，allowance是授权额度
+    //你是第一个address,然后你对所有人的授权【mapping (address => uint256)】
+    //【mapping (address => uint256)】相当于一个授权表，记录你的授权情况
+    mapping (address => mapping (address => uint256)) public allowance;
+ 
+    //事件：转账情况
+    event Transfer(address indexed from, address indexed to, uint256 value);
+    //事件：授权情况
+    event Approval(address indexed owner, address indexed spender, uint256 value);
+    //事件：销毁币情况
+    event Burn(address indexed from, uint256 value);
+ 
+ 
+    //构造器：确定总币数，币种的名字，币种的简称
+    function TokenERC20(uint256 initialSupply, string tokenName, string tokenSymbol) public {
+        totalSupply = initialSupply * 10 ** uint256(decimals);
+        balanceOf[msg.sender] = totalSupply;
+        name = tokenName;
+        symbol = tokenSymbol;
+    }
+ 
+    //合约内部：转币
+    function _transfer(address _from, address _to, uint _value) internal {
+        require(_to != 0x0);//不可以是转到0地址（相当于销毁币）
+        require(balanceOf[_from] >= _value);//要有足够的币转出
+        require(balanceOf[_to] + _value > balanceOf[_to]);//防止向上溢出
+ 
+        //（*）代码的目的：转账前后，转账两者的钱数量不变，这是为了安全考虑
+        uint previousBalances = balanceOf[_from] + balanceOf[_to];（*）
+        balanceOf[_from] -= _value;//转出钱
+        balanceOf[_to] += _value;//转进钱
+        emit Transfer(_from, _to, _value);//记录事件
+        assert(balanceOf[_from] + balanceOf[_to] == previousBalances);（*）
+    }
+ 
+    //外部调用：转币
+    function transfer(address _to, uint256 _value) public returns (bool) {
+        _transfer(msg.sender, _to, _value);
+        return true;
+    }
+ 
+    //用户授权转出：_from是委托人（授权人），msg.sender是被委托人
+    function transferFrom(address _from, address _to, uint256 _value) public returns (bool success) {
+        //保证要转出的钱小于等于授权的钱
+        require(_value <= allowance[_from][msg.sender]);
+        allowance[_from][msg.sender] -= _value;
+        _transfer(_from, _to, _value);
+        return true;
+    }
+ 
+    //授权：委托人给被委托人一个授权金额
+    function approve(address _spender, uint256 _value) public
+        returns (bool success) {
+        allowance[msg.sender][_spender] = _value;//委托人给被委托人一个金额授权值
+        emit Approval(msg.sender, _spender, _value);//记录事件：授权情况
+        return true;
+    }
+ 
+    //实现接口：授权并且调用：授权人msg.sender，授权给_spender，
+    function approveAndCall(address _spender, uint256 _value, bytes _extraData) public returns (bool success) {
+        tokenRecipient spender = tokenRecipient(_spender);
+        if (approve(_spender, _value)) {
+            spender.receiveApproval(msg.sender, _value, this, _extraData);
+            return true;
+        }
+    }
+ 
+    //销毁币
+    function burn(uint256 _value) public returns (bool success) {
+        require(balanceOf[msg.sender] >= _value);//你要有足够的币销毁
+        balanceOf[msg.sender] -= _value;//将币置为0
+        totalSupply -= _value;//发行币的量置为0
+        emit Burn(msg.sender, _value);//记录毁币事件
+        return true;
+    }
+     
+    //授权给别人去毁币
+    function burnFrom(address _from, uint256 _value) public returns (bool success) {
+        require(balanceOf[_from] >= _value);//毁币数量足够
+        require(_value <= allowance[_from][msg.sender]);//授权的毁币数满足在授权范围内
+        balanceOf[_from] -= _value;
+        allowance[_from][msg.sender] -= _value;
+        totalSupply -= _value;
+        emit Burn(_from, _value);//记录事件
+        return true;
+    }
+}
